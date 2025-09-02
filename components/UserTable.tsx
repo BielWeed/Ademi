@@ -4,7 +4,7 @@ import type { UserProfile } from '../types';
 
 interface UserTableProps {
   users: UserProfile[];
-  onDeleteUser: (userId: string) => void;
+  onDeleteUser: (user: UserProfile) => void;
 }
 
 const UserTable: React.FC<UserTableProps> = ({ users, onDeleteUser }) => {
@@ -35,7 +35,7 @@ const UserTable: React.FC<UserTableProps> = ({ users, onDeleteUser }) => {
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                 <button
-                  onClick={() => onDeleteUser(user.id)}
+                  onClick={() => onDeleteUser(user)}
                   className="text-red-600 hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-150"
                   aria-label={`Deletar usuário ${user.username}`}
                 >

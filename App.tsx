@@ -1,15 +1,26 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { UserProfile } from './types';
 import { supabaseService } from './services/supabaseService';
 import UserTable from './components/UserTable';
 import Spinner from './components/Spinner';
+import SearchInput from './components/SearchInput';
+import ConfirmationModal from './components/ConfirmationModal';
+import Toast from './components/Toast';
+
+interface ToastState {
+  message: string;
+  type: 'success' | 'error';
+}
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
@@ -56,7 +67,6 @@ const App: React.FC = () => {
       window.parent.postMessage({ type: 'APP_LOADED' }, '*');
     };
 
-    // Using window.onload to ensure the entire app including scripts is ready
     if(document.readyState === 'complete') {
         handleLoad();
     } else {
@@ -65,22 +75,32 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleDeleteUser = useCallback(async (userId: string) => {
-    if (window.confirm('Tem certeza que deseja deletar este usuário? Esta ação não pode ser desfeita.')) {
-      try {
-        await supabaseService.deleteUser(userId);
-        console.log(`User ${userId} deleted.`);
-        // Notify parent app of successful deletion
-        window.parent.postMessage({ type: 'USER_DELETED', payload: { userId } }, '*');
-        // Refresh the user list
-        await loadUsers();
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-        setError(`Failed to delete user: ${errorMessage}`);
-        alert(`Error: ${errorMessage}`);
-      }
+  const handleDeleteRequest = useCallback((user: UserProfile) => {
+    setUserToDelete(user);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!userToDelete) return;
+
+    try {
+      await supabaseService.deleteUser(userToDelete.id);
+      console.log(`User ${userToDelete.id} deleted.`);
+      window.parent.postMessage({ type: 'USER_DELETED', payload: { userId: userToDelete.id } }, '*');
+      setToast({ message: 'Usuário deletado com sucesso!', type: 'success' });
+      setUserToDelete(null); // Close modal
+      await loadUsers(); // Refresh the user list
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
+      setToast({ message: `Falha ao deletar usuário: ${errorMessage}`, type: 'error' });
+      console.error(`Failed to delete user: ${errorMessage}`);
+      setUserToDelete(null); // Close modal
     }
-  }, [loadUsers]);
+  }, [userToDelete, loadUsers]);
+
+  const filteredUsers = useMemo(() => 
+    users.filter(user => 
+      user.username.toLowerCase().includes(searchTerm.toLowerCase())
+    ), [users, searchTerm]);
 
   const renderContent = () => {
     if (!isInitialized && isLoading) {
@@ -109,18 +129,44 @@ const App: React.FC = () => {
       return <div className="text-center p-8 text-gray-500">Nenhum usuário encontrado.</div>;
     }
 
-    return <UserTable users={users} onDeleteUser={handleDeleteUser} />;
+    return (
+        <>
+            <div className="mb-6">
+                <SearchInput 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Buscar por email..."
+                />
+            </div>
+            {filteredUsers.length > 0 ? (
+                <UserTable users={filteredUsers} onDeleteUser={handleDeleteRequest} />
+            ) : (
+                <div className="text-center p-8 text-gray-500">Nenhum usuário corresponde à sua busca.</div>
+            )}
+        </>
+    );
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden">
-        <div className="p-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Administração de Usuários</h2>
-          {renderContent()}
+    <>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      <ConfirmationModal
+        isOpen={!!userToDelete}
+        onClose={() => setUserToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Confirmar Exclusão"
+      >
+        Tem certeza que deseja deletar o usuário <strong>{userToDelete?.username}</strong>? Esta ação não pode ser desfeita.
+      </ConfirmationModal>
+      <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8">
+        <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">Administração de Usuários</h2>
+            {renderContent()}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 
