@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { UserProfile } from './types';
 import { supabaseService } from './services/supabaseService';
@@ -38,42 +37,58 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const handleMessage = async (event: MessageEvent) => {
-      if (event.data.type === 'AUTH_TOKEN' && !isInitialized) {
-        console.log('AUTH_TOKEN received from parent app.');
-        try {
-          await supabaseService.initialize(event.data.token);
-          console.log('Supabase client initialized.');
-          setIsInitialized(true);
-          await loadUsers();
-        } catch (err) {
-           const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-           setError(`Initialization failed: ${errorMessage}`);
-           setIsLoading(false);
-        }
+    let initTimeout: number;
+
+    const initializeApp = async (token: string) => {
+      // Prevent re-initialization if a token arrives after the timeout has already fired
+      if (isInitialized) {
+        return;
+      }
+
+      try {
+        await supabaseService.initialize(token);
+        console.log('Supabase client initialized.');
+        setIsInitialized(true);
+        await loadUsers();
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
+        setError(`Initialization failed: ${errorMessage}`);
+        setIsLoading(false);
       }
     };
-    
-    window.addEventListener('message', handleMessage);
 
-    return () => {
-      window.removeEventListener('message', handleMessage);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'AUTH_TOKEN') {
+        console.log('AUTH_TOKEN received from parent app.');
+        clearTimeout(initTimeout); // Cancel the dev mode fallback
+        initializeApp(event.data.token);
+      }
     };
-  }, [isInitialized, loadUsers]);
 
-  useEffect(() => {
-    const handleLoad = () => {
+    window.addEventListener('message', handleMessage);
+    
+    // Notify parent app that the micro-app has loaded.
+    // This helps the parent app know when it can send the token.
+    if (window.self !== window.top) {
       console.log('App loaded, sending APP_LOADED message to parent.');
       window.parent.postMessage({ type: 'APP_LOADED' }, '*');
-    };
-
-    if(document.readyState === 'complete') {
-        handleLoad();
-    } else {
-        window.addEventListener('load', handleLoad);
-        return () => window.removeEventListener('load', handleLoad);
     }
-  }, []);
+    
+    // Fallback to initialize in dev mode if no token is received after a short delay.
+    // This allows development even if the app is inside a dev iframe without a real parent.
+    initTimeout = window.setTimeout(() => {
+      if (!isInitialized) {
+        console.warn('No token received, initializing in dev mode as a fallback.');
+        initializeApp('dev-mock-token');
+      }
+    }, 1500);
+
+    // Cleanup function runs when the component unmounts or before the effect re-runs.
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearTimeout(initTimeout);
+    };
+  }, [isInitialized, loadUsers]);
 
   const handleDeleteRequest = useCallback((user: UserProfile) => {
     setUserToDelete(user);
@@ -85,7 +100,10 @@ const App: React.FC = () => {
     try {
       await supabaseService.deleteUser(userToDelete.id);
       console.log(`User ${userToDelete.id} deleted.`);
-      window.parent.postMessage({ type: 'USER_DELETED', payload: { userId: userToDelete.id } }, '*');
+      // Also notify parent app upon successful deletion
+      if (window.self !== window.top) {
+        window.parent.postMessage({ type: 'USER_DELETED', payload: { userId: userToDelete.id } }, '*');
+      }
       setToast({ message: 'Usuário deletado com sucesso!', type: 'success' });
       setUserToDelete(null); // Close modal
       await loadUsers(); // Refresh the user list
