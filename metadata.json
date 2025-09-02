@@ -1,0 +1,5 @@
+{
+  "name": "Admin User Management Panel",
+  "description": "A micro-app for administrators to view and delete user profiles. It loads within an iframe and communicates with a central application for authentication.",
+  "requestFramePermissions": []
+}
